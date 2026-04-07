@@ -13,6 +13,7 @@ import pandas as pd
 import shutil
 from io import BytesIO
 from typing import Union, List, Optional
+import os
 from flask import Flask
 from threading import Thread
 
@@ -29,8 +30,12 @@ def keep_alive():
     t = Thread(target=run)
     t.start()
 
-# GỌI HÀM NÀY TRƯỚC KHI CHẠY BOT
+# Gọi hàm này ngay lập tức, không thụt lề
 keep_alive()
+
+# Sau đó mới đến các dòng code Bot của bạn...
+# Ví dụ: bot = disnake.Client(...)
+
  ==========================================
 # --- CẤU HÌNH CỐ ĐỊNH (REQUIRED) ---
 # ==========================================
