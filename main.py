@@ -17,7 +17,7 @@ from typing import Union, List, Optional
 # ==========================================
 # --- CẤU HÌNH CỐ ĐỊNH (REQUIRED) ---
 # ==========================================
-TOKEN = os.getenv("DISCORD_TOKEN")
+TOKEN ="DISCORD_TOKEN"
 OWNER_IDS = [1376562278488473630]  # Thay bằng ID Discord của bạn
 DEFAULT_COLOR = 0x2b2d31
 SUCCESS_COLOR = 0x43b581
