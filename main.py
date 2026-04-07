@@ -13,8 +13,26 @@ import pandas as pd
 import shutil
 from io import BytesIO
 from typing import Union, List, Optional
+from flask import Flask
+from threading import Thread
+import os
 
-# ==========================================
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot Ngân Hàng Việt Nam Official đang chạy!"
+
+def run():
+    app.run(host='0.0.0.0', port=10000)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
+
+# Kích hoạt cổng ảo
+keep_alive()
+ ==========================================
 # --- CẤU HÌNH CỐ ĐỊNH (REQUIRED) ---
 # ==========================================
 TOKEN ="DISCORD_TOKEN"
