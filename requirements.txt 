@@ -1,0 +1,5 @@
+disnake
+aiosqlite
+psutil
+pandas
+openpyxl
