@@ -14,28 +14,27 @@ import shutil
 from io import BytesIO
 from typing import Union, List, Optional
 import os
-from flask import Flask
-from threading import Thread
+import disnake
+from flask import Flask        # Sát lề trái
+from threading import Thread  # Sát lề trái
 
-app = Flask('')
+app = Flask('') # Sát lề trái
 
-@app.route('/')
+@app.route('/') # Sát lề trái
 def home():
-    return "Bot Ngân Hàng Việt Nam Official is Online!"
+    return "Bot Online!" # Thụt vào 4 dấu cách
 
-def run():
-    app.run(host='0.0.0.0', port=10000)
+def run(): # Sát lề trái
+    app.run(host='0.0.0.0', port=10000) # Thụt vào 4 dấu cách
 
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
+def keep_alive(): # Sát lề trái
+    t = Thread(target=run) # Thụt vào 4 dấu cách
+    t.start() # Thụt vào 4 dấu cách
 
-# Gọi hàm này ngay lập tức, không thụt lề
-keep_alive()
+keep_alive() # Sát lề trái - QUAN TRỌNG
 
-# Sau đó mới đến các dòng code Bot của bạn...
-# Ví dụ: bot = disnake.Client(...)
-
+# --- Dưới đây là code Bot cũ của bạn ---
+# Đảm bảo các dòng bot = ... cũng sát lề trái
  ==========================================
 # --- CẤU HÌNH CỐ ĐỊNH (REQUIRED) ---
 # ==========================================
