@@ -13,28 +13,6 @@ import pandas as pd
 import shutil
 from io import BytesIO
 from typing import Union, List, Optional
-import os
-import disnake
-from flask import Flask        # Sát lề trái
-from threading import Thread  # Sát lề trái
-
-app = Flask('') # Sát lề trái
-
-@app.route('/') # Sát lề trái
-def home():
-    return "Bot Online!" # Thụt vào 4 dấu cách
-
-def run(): # Sát lề trái
-    app.run(host='0.0.0.0', port=10000) # Thụt vào 4 dấu cách
-
-def keep_alive(): # Sát lề trái
-    t = Thread(target=run) # Thụt vào 4 dấu cách
-    t.start() # Thụt vào 4 dấu cách
-
-keep_alive() # Sát lề trái - QUAN TRỌNG
-
-# --- Dưới đây là code Bot cũ của bạn ---
-# Đảm bảo các dòng bot = ... cũng sát lề trái
  ==========================================
 # --- CẤU HÌNH CỐ ĐỊNH (REQUIRED) ---
 # ==========================================
