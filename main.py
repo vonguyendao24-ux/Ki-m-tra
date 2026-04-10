@@ -1,23 +1,44 @@
-import disnake
-from disnake.ext import commands, tasks
-import aiosqlite
+import os
+import time
 import uuid
 import json
-import time
-import psutil
+import shutil
+import asyncio
 import platform
 import datetime
-import asyncio
-import os
-import pandas as pd
-import shutil
 from io import BytesIO
 from typing import Union, List, Optional
 
-#==========================================
-# --- CẤU HÌNH CỐ ĐỊNH (REQUIRED) ---
+import disnake
+from disnake.ext import commands, tasks
+import aiosqlite
+import psutil
+import pandas as pd
+from flask import Flask
+from threading import Thread
+
 # ==========================================
-TOKEN ="DISCORD_TOKEN"
+# --- HỆ THỐNG KEEP-ALIVE (FLASK) ---
+# ==========================================
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot Ngân Hàng Việt Nam Official đang hoạt động 24/7!"
+
+def run_flask():
+    app.run(host='0.0.0.0', port=10000)
+
+def keep_alive():
+    t = Thread(target=run_flask)
+    t.start()
+
+# Kích hoạt cổng ảo ngay lập tức
+keep_alive()
+
+# ==========================================
+# --- CẤU HÌNH CỐ ĐỊNH (CONFIG) ---
+# ==========================================
 OWNER_IDS = [1376562278488473630]  # Thay bằng ID Discord của bạn
 DEFAULT_COLOR = 0x2b2d31
 SUCCESS_COLOR = 0x43b581
@@ -44,14 +65,12 @@ bot = commands.Bot(
 # ==========================================
 # --- HỆ THỐNG DATABASE (SQLITE) ---
 # ==========================================
-
 async def init_db():
     """Khởi tạo toàn bộ cấu trúc bảng dữ liệu"""
     if not os.path.exists(DB_BACKUP_DIR):
         os.makedirs(DB_BACKUP_DIR)
         
     async with aiosqlite.connect(DB_PATH) as db:
-        # 1. Bảng lưu trữ Backup Keys
         await db.execute("""
             CREATE TABLE IF NOT EXISTS backups (
                 key_id TEXT PRIMARY KEY,
@@ -62,7 +81,6 @@ async def init_db():
                 uses_left INTEGER DEFAULT 1
             )
         """)
-        # 2. Bảng cấu hình chi tiết Server
         await db.execute("""
             CREATE TABLE IF NOT EXISTS settings (
                 guild_id INTEGER PRIMARY KEY,
@@ -74,7 +92,6 @@ async def init_db():
                 language TEXT DEFAULT 'vi'
             )
         """)
-        # 3. Bảng danh sách Authorized (Phân quyền Admin bot)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS authorized (
                 guild_id INTEGER,
@@ -84,16 +101,14 @@ async def init_db():
                 PRIMARY KEY (guild_id, user_id)
             )
         """)
-        # 4. Bảng Blacklist (Chặn người dùng/server)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS blacklist (
                 target_id INTEGER PRIMARY KEY,
-                type TEXT, -- 'user' or 'guild'
+                type TEXT,
                 reason TEXT,
                 timestamp TIMESTAMP
             )
         """)
-        # 5. Bảng thống kê hệ thống (Analytics)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS analytics (
                 date TEXT PRIMARY KEY,
@@ -106,7 +121,6 @@ async def init_db():
 # ==========================================
 # --- HỆ THỐNG KIỂM TRA QUYỀN & TIỆN ÍCH ---
 # ==========================================
-
 async def is_owner(ctx_or_inter):
     return ctx_or_inter.author.id in OWNER_IDS
 
@@ -139,11 +153,10 @@ async def update_analytics(type: str):
 # ==========================================
 # --- GIAO DIỆN (UI/UX) NÂNG CAO ---
 # ==========================================
-
 class ApprovalView(disnake.ui.View):
     """View dành cho Admin phê duyệt yêu cầu khôi phục role"""
     def __init__(self, key_id: str, member_id: int, roles: list):
-        super().__init__(timeout=3600) # Timeout 1 tiếng
+        super().__init__(timeout=3600)
         self.key_id = key_id
         self.member_id = member_id
         self.roles = roles
@@ -158,7 +171,6 @@ class ApprovalView(disnake.ui.View):
         if not member:
             return await inter.edit_original_message(content="❌ Người dùng không còn trong server.", view=None)
 
-        # Lọc roles hợp lệ (thứ bậc thấp hơn bot)
         to_add = []
         for rid in self.roles:
             role = inter.guild.get_role(int(rid))
@@ -168,27 +180,22 @@ class ApprovalView(disnake.ui.View):
         try:
             await member.add_roles(*to_add, reason=f"Approved by Admin: {inter.author}")
             
-            # Cập nhật database: Xóa key
             async with aiosqlite.connect(DB_PATH) as db:
                 await db.execute("DELETE FROM backups WHERE key_id = ?", (self.key_id,))
                 await db.commit()
 
-            # Update Analytics
             await update_analytics("sync")
 
-            # Update UI
             embed = inter.message.embeds[0]
             embed.color = SUCCESS_COLOR
             embed.title = "🛡️ Yêu cầu đã được phê duyệt"
             embed.add_field(name="Trạng thái", value=f"✅ Đã cấp `{len(to_add)}` roles.\n👤 Admin: {inter.author.mention}", inline=False)
             await inter.edit_original_message(embed=embed, view=None)
 
-            # Log to Channel
             log_embed = disnake.Embed(title="📝 Nhật Ký: Khôi Phục Role", color=SUCCESS_COLOR)
             log_embed.add_field(name="Thành viên", value=member.mention, inline=True)
             log_embed.add_field(name="Người duyệt", value=inter.author.mention, inline=True)
             log_embed.set_footer(text=f"Key: {self.key_id}")
-            # (Hàm gửi log sẽ được gọi sau)
 
         except Exception as e:
             await inter.followup.send(f"Lỗi: {e}", ephemeral=True)
@@ -234,7 +241,6 @@ class SyncModalV3(disnake.ui.Modal):
         if data[0] != inter.author.id:
             return await inter.response.send_message("❌ Bạn không phải chủ nhân của Key này!", ephemeral=True)
 
-        # Kiểm tra config server
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute("SELECT confirm_channel FROM settings WHERE guild_id = ?", (inter.guild.id,)) as cursor:
                 config = await cursor.fetchone()
@@ -262,11 +268,9 @@ class PanelViewV3(disnake.ui.View):
 
     @disnake.ui.button(label="Backup Roles", style=disnake.ButtonStyle.blurple, emoji="💾", custom_id="btn_bk_v3")
     async def backup(self, button, inter):
-        # Kiểm tra Blacklist
         if await is_blacklisted(inter.author.id):
             return await inter.response.send_message("❌ Bạn đã bị chặn khỏi hệ thống!", ephemeral=True)
 
-        # Lấy dữ liệu server
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute("SELECT max_backups, premium_status FROM settings WHERE guild_id = ?", (inter.guild.id,)) as cursor:
                 config = await cursor.fetchone()
@@ -278,7 +282,6 @@ class PanelViewV3(disnake.ui.View):
         if current_count >= max_bk:
             return await inter.response.send_message(f"❌ Bạn đã hết lượt backup (Giới hạn: {max_bk}). Hãy xóa bớt key cũ!", ephemeral=True)
 
-        # Lọc role
         roles = [r.id for r in inter.author.roles if r.id != inter.guild.id and not r.is_bot_managed() and r < inter.guild.me.top_role]
         if not roles:
             return await inter.response.send_message("❌ Bạn không có vai trò nào đủ điều kiện để lưu trữ!", ephemeral=True)
@@ -321,10 +324,61 @@ class PanelViewV3(disnake.ui.View):
         text = "\n".join([f"• `{k[0]}` (Tạo ngày: {k[1][:10]})" for k in keys])
         await inter.response.send_message(f"🗝️ **Danh sách Key của bạn:**\n{text}", ephemeral=True)
 
+class GradeModal(disnake.ui.Modal):
+    """Modal chấm thi chuyên nghiệp"""
+    def __init__(self, candidate: disnake.Member, phase: str):
+        self.candidate = candidate
+        self.phase = phase
+        
+        components = [
+            disnake.ui.TextInput(
+                label="Điểm tổng kết (%)",
+                custom_id="score",
+                placeholder="Ví dụ: 55",
+                max_length=3
+            ),
+            disnake.ui.TextInput(
+                label="Nhận xét (Feedback)",
+                custom_id="feedback",
+                placeholder="Nhập nội dung nhận xét...",
+                style=disnake.TextInputStyle.paragraph,
+                max_length=1000
+            )
+        ]
+        super().__init__(title=f"Chấm bài: {candidate.name}", components=components)
+
+    async def callback(self, inter: disnake.ModalInteraction):
+        try:
+            score_val = int(inter.text_values["score"])
+        except ValueError:
+            return await inter.response.send_message("❌ Vui lòng chỉ nhập số cho phần điểm!", ephemeral=True)
+
+        feedback_val = inter.text_values["feedback"]
+        status = "PASSED" if score_val >= 50 else "FAILED"
+        color = 0x43b581 if status == "PASSED" else 0xf04747
+        filled = min(10, int(score_val / 10))
+        progress_bar = f"[{'█' * filled}{'░' * (10 - filled)}]"
+
+        embed = disnake.Embed(title="🔔 Notification:", color=color, description=f"{self.candidate.mention}")
+        embed.set_author(name="PHASE GRADING RESULT")
+        
+        embed.add_field(name="👤 CANDIDATE INFO", value=f"**Name:** {self.candidate.name}\n**ID:** {self.candidate.id}\n**Discord:** {self.candidate.mention}", inline=False)
+        embed.add_field(name="📊 GRADING STATUS", value=f"**Status: [ {status} ]**\n**Phase: Attempt {self.phase}**", inline=False)
+        embed.add_field(name="💯 OVERALL SCORE", value=f"**{progress_bar} {score_val}%**", inline=False)
+        embed.add_field(name="📝 FEEDBACK", value=f"```\n{feedback_val}\n```", inline=False)
+        embed.add_field(name="👮 EXAMINER", value=f"{inter.author.mention} • **Admin Staff**", inline=False)
+
+        embed.set_thumbnail(url=self.candidate.display_avatar.url)
+        embed.set_footer(text="Reset: 7 Days • SROVAF System")
+        embed.timestamp = datetime.datetime.now()
+
+        await inter.response.send_message("✅ Đã gửi kết quả chấm thi!", ephemeral=True)
+        await inter.channel.send(embed=embed)
+
+
 # ==========================================
 # --- COGS: HỆ THỐNG LỆNH CHÍNH ---
 # ==========================================
-
 class UltimateBackup(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -343,7 +397,6 @@ class UltimateBackup(commands.Cog):
     @commands.slash_command(name="grade", description="Lệnh chấm bài thi chuyên nghiệp")
     async def grade_cmd(self, inter: disnake.ApplicationCommandInteraction, candidate: disnake.Member, phase: str = "1/2"):
         await inter.response.send_modal(modal=GradeModal(candidate, phase))
-
     
     @commands.Cog.listener()
     async def on_ready(self):
@@ -352,7 +405,6 @@ class UltimateBackup(commands.Cog):
         print(f"[{datetime.datetime.now()}] >>> SYSTEM READY: {self.bot.user}")
 
     # --- SLASH COMMANDS: QUẢN TRỊ ---
-
     @commands.slash_command(name="admin")
     async def admin_group(self, inter): pass
 
@@ -370,7 +422,7 @@ class UltimateBackup(commands.Cog):
             ),
             color=DEFAULT_COLOR
         )
-        embed.set_image(url="https://cdn.discordapp.com/attachments/1054607292311543848/1386261499768471643/standard_3.gif?ex=69d21d21&is=69d0cba1&hm=8f16736b8d1247033c1642b78f76b5896e71c0ce1ebe3c1b5883d6fd1209331f&") # Banner mặc định
+        embed.set_image(url="https://cdn.discordapp.com/attachments/1054607292311543848/1386261499768471643/standard_3.gif")
         embed.set_footer(text=f"Server ID: {inter.guild.id} • Power by Global Tech", icon_url=self.bot.user.display_avatar.url)
         
         await inter.response.send_message("🚀 Đang khởi tạo Panel...", ephemeral=True)
@@ -425,7 +477,6 @@ class UltimateBackup(commands.Cog):
         if not rows:
             return await inter.edit_original_message(content="❌ Không có dữ liệu để xuất.")
 
-        # Tạo DataFrame
         df = pd.DataFrame(rows, columns=['Mã Key', 'User ID', 'Server ID', 'Data Roles', 'Ngày Tạo', 'Lượt Dùng'])
         
         with BytesIO() as output:
@@ -436,7 +487,6 @@ class UltimateBackup(commands.Cog):
             await inter.edit_original_message(content="📊 Báo cáo định dạng Excel đã sẵn sàng:", file=file)
 
     # --- SLASH COMMANDS: CHỦ BOT (OWNER) ---
-
     @commands.slash_command(name="owner")
     @commands.check(is_owner)
     async def owner_group(self, inter): pass
@@ -463,7 +513,6 @@ class UltimateBackup(commands.Cog):
         embed.add_field(name="🔄 Tổng Sync", value=f"`{res[1] or 0}`", inline=True)
         embed.add_field(name="🗝️ Key Hiện Có", value=f"`{total_keys}`", inline=True)
         
-        # Tạo biểu đồ đơn giản bằng text
         history_text = "```\nNgày       | Backup | Sync\n"
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute("SELECT * FROM analytics ORDER BY date DESC LIMIT 5") as cursor:
@@ -475,7 +524,6 @@ class UltimateBackup(commands.Cog):
         await inter.response.send_message(embed=embed)
 
     # --- SLASH COMMANDS: THÔNG TIN ---
-
     @commands.slash_command(name="uptime", description="Kiểm tra tình trạng sức khỏe của Bot")
     async def uptime_check(self, inter):
         uptime = datetime.timedelta(seconds=int(time.time() - self.start_time))
@@ -505,67 +553,15 @@ class UltimateBackup(commands.Cog):
                 "`/admin setup`: Cài đặt kênh Log/Confirm.\n"
                 "`/admin authorized`: Cấp quyền duyệt cho nhân viên.\n"
                 "`/admin export`: Xuất báo cáo Excel.\n\n"
-                "**Hỗ trợ:** Liên hệ [Developer Name]"
+                "**Hỗ trợ:** Liên hệ Ban Quản Trị Server."
             ),
             color=DEFAULT_COLOR
         )
         await inter.response.send_message(embed=embed, ephemeral=True)
-# --- CHÈN VÀO KHOẢNG HÀNG 300 (Trước phần khởi chạy Bot) ---
-
-class GradeModal(disnake.ui.Modal):
-    def __init__(self, candidate: disnake.Member, phase: str):
-        self.candidate = candidate
-        self.phase = phase
-        
-        components = [
-            disnake.ui.TextInput(
-                label="Điểm tổng kết (%)",
-                custom_id="score",
-                placeholder="Ví dụ: 55",
-                max_length=3
-            ),
-            disnake.ui.TextInput(
-                label="Nhận xét (Feedback)",
-                custom_id="feedback",
-                placeholder="Nhập nội dung nhận xét...",
-                style=disnake.TextInputStyle.paragraph,
-                max_length=1000
-            )
-        ]
-        super().__init__(title=f"Chấm bài: {candidate.name}", components=components)
-
-    async def callback(self, inter: disnake.ModalInteraction):
-        try:
-            score_val = int(inter.text_values["score"])
-        except ValueError:
-            return await inter.response.send_message("❌ Vui lòng chỉ nhập số cho phần điểm!", ephemeral=True)
-
-        feedback_val = inter.text_values["feedback"]
-        status = "PASSED" if score_val >= 50 else "FAILED"
-        color = 0x43b581 if status == "PASSED" else 0xf04747
-        filled = int(score_val / 10)
-        progress_bar = f"[{'█' * filled}{'░' * (10 - filled)}]"
-
-        embed = disnake.Embed(title="🔔 Notification:", color=color, description=f"{self.candidate.mention}")
-        embed.set_author(name="PHASE GRADING RESULT")
-        
-        embed.add_field(name="👤 CANDIDATE INFO", value=f"**Name:** {self.candidate.name}\n**ID:** {self.candidate.id}\n**Discord:** {self.candidate.mention}", inline=False)
-        embed.add_field(name="📊 GRADING STATUS", value=f"**Status: [ {status} ]**\n**Phase: Attempt {self.phase}**", inline=False)
-        embed.add_field(name="💯 OVERALL SCORE", value=f"**{progress_bar} {score_val}%**", inline=False)
-        embed.add_field(name="📝 FEEDBACK", value=f"```\n{feedback_val}\n```", inline=False)
-        embed.add_field(name="👮 EXAMINER", value=f"{inter.author.mention} • **Admin Staff**", inline=False)
-
-        embed.set_thumbnail(url=self.candidate.display_avatar.url)
-        embed.set_footer(text="Reset: 7 Days • SROVAF System")
-        embed.timestamp = datetime.datetime.now()
-
-        await inter.response.send_message("✅ Đã gửi kết quả chấm thi!", ephemeral=True)
-        await inter.channel.send(embed=embed)
 
 # ==========================================
-# --- KHỞI CHẠY ---
+# --- KHỞI CHẠY BOT ---
 # ==========================================
-
 bot.add_cog(UltimateBackup(bot))
 
 @bot.event
@@ -576,7 +572,10 @@ async def on_command_error(ctx, error):
         await ctx.send("❌ Lệnh này chỉ dành cho chủ Bot!", delete_after=5)
 
 if __name__ == "__main__":
-    if TOKEN == "YOUR_BOT_TOKEN_HERE":
-        print("❌ LỖI: Vui lòng điền Bot Token vào biến TOKEN!")
+    # Đọc Token an toàn từ Environment Variables của Render
+    TOKEN = os.getenv("DISCORD_TOKEN")
+    
+    if not TOKEN:
+        print("❌ LỖI NGHIÊM TRỌNG: Không tìm thấy DISCORD_TOKEN trong Environment Variables của Render!")
     else:
         bot.run(TOKEN)
