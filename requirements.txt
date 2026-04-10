@@ -3,3 +3,4 @@ aiosqlite
 psutil
 pandas
 openpyxl
+flask
