@@ -1,272 +1,303 @@
 import discord
-import os
-import json
-import uuid
-import datetime
 from discord import app_commands, ui
 from discord.ext import commands
+import datetime
+import json
+import os
+import uuid
 from flask import Flask
 from threading import Thread
 
 # ==========================================
-# 🌐 KEEP ALIVE SYSTEM
+# 🌐 HỆ THỐNG GIỮ BOT ONLINE (KEEP ALIVE)
 # ==========================================
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "HQ System is Online and Running!"
+    return "HQ System is Online!"
 
-def run_server():
+def run():
     app.run(host='0.0.0.0', port=8080)
 
 def keep_alive():
-    t = Thread(target=run_server)
+    t = Thread(target=run)
     t.start()
 
 # ==========================================
-# 🗄️ DATABASE MANAGEMENT
+# ⚙️ CẤU HÌNH VÀ DỮ LIỆU (DATABASE)
 # ==========================================
+TOKEN = "DISCORD_TOKEN" 
 DATA_FILE = "vpoas_data.json"
 
 def load_data():
     if not os.path.exists(DATA_FILE):
-        return {"blacklist": {}, "warns": {}}
-    
+        return {"blacklist": {}, "warns": {}, "diplomacy": {}}
     try:
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-            # Đảm bảo cấu trúc data không bị lỗi
-            if "blacklist" not in data:
-                data["blacklist"] = {}
-            if "warns" not in data:
-                data["warns"] = {}
+            # Bảo đảm không thiếu mục nào khi nâng cấp
+            if "blacklist" not in data: data["blacklist"] = {}
+            if "warns" not in data: data["warns"] = {}
+            if "diplomacy" not in data: data["diplomacy"] = {}
             return data
     except:
-        return {"blacklist": {}, "warns": {}}
+        return {"blacklist": {}, "warns": {}, "diplomacy": {}}
 
 def save_data(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4)
+        json.dump(data, f, indent=4, ensure_ascii=False)
 
 # ==========================================
-# 💻 MODERN ACTIVITY UI (ĐIỂM DANH)
+# 💻 GIAO DIỆN ĐIỂM DANH (ACTIVITY UI)
 # ==========================================
 class ActivityView(ui.View):
-    def __init__(self, target_role: discord.Role, note: str, message: str):
+    def __init__(self, target_role: discord.Role, note: str, message_content: str):
         super().__init__(timeout=None)
         self.target_role = target_role
         self.note = note
-        self.message = message
+        self.message_content = message_content
         self.verified_users = set()
         self.start_time = datetime.datetime.now()
 
+    def create_progress_bar(self, current, total):
+        if total == 0: return "[..........] 0%"
+        percent = (current / total) * 100
+        filled = int(percent / 10)
+        bar = "❚" * filled + " " * (10 - filled)
+        return f"[{bar}]\n-> {percent:.1f}%"
+
     def build_embed(self):
-        # Tính toán số lượng
         real_members = [m for m in self.target_role.members if not m.bot]
         total = len(real_members)
         verified = len(self.verified_users)
         unverified = total - verified
         
-        # Đổi màu xanh nếu đã xong, đỏ nếu chưa xong
-        color = 0x57F287 if unverified == 0 else 0xED4245
+        # UI Hiện đại với màu sắc trạng thái
+        color = 0x43b581 if unverified == 0 else 0xdd2e44
         
-        # Tạo thanh tiến trình hiện đại
-        percent = (verified / total) * 100 if total > 0 else 0
-        filled_blocks = int(percent / 10)
-        progress_bar = "█" * filled_blocks + "░" * (10 - filled_blocks)
-
-        # Xây dựng Embed
-        embed = discord.Embed(title="📊 SYSTEM ACTIVITY CHECK", color=color)
-        embed.description = f"**TARGET UNIT:** {self.target_role.mention}\n> {self.note}"
+        embed = discord.Embed(
+            title=f"Activity Check #{int(self.start_time.timestamp()) % 1000}", 
+            color=color,
+            description=f"Unit: {self.target_role.mention}"
+        )
+        embed.add_field(name="Time Started:", value=self.start_time.strftime("%H:%M:%S"), inline=False)
+        embed.add_field(name="Note:", value=self.note, inline=False)
+        embed.add_field(name="Verified:", value=f"{verified}/{total} members", inline=True)
+        embed.add_field(name="Unverified:", value=f"{unverified} members", inline=True)
+        embed.add_field(name="Progress:", value=f"```\n{self.create_progress_bar(verified, total)}\n```", inline=False)
         
-        start_str = self.start_time.strftime('%H:%M:%S')
-        embed.add_field(name="⏱️ Start Time", value=f"`{start_str}`", inline=True)
-        embed.add_field(name="🟢 Verified", value=f"`{verified}/{total}` personnel", inline=True)
-        embed.add_field(name="🔴 Unverified", value=f"`{unverified}` personnel", inline=True)
-        embed.add_field(name="📈 Progress", value=f"`[{progress_bar}] {percent:.1f}%`", inline=False)
+        status = "MISSION ACCOMPLISHED" if unverified == 0 else "STATUS: IN PROGRESS"
+        embed.add_field(name="System Status", value=status, inline=False)
         
-        if self.message:
-            embed.add_field(name="📣 Commander's Message", value=f"```{self.message}```", inline=False)
-            
-        status_text = "COMPLETED" if unverified == 0 else "IN PROGRESS"
-        system_id = int(self.start_time.timestamp())
-        embed.set_footer(text=f"System ID: {system_id} • Status: {status_text}")
-        
+        if self.message_content:
+             embed.add_field(name="Command Message:", value=self.message_content, inline=False)
+             
+        embed.set_footer(text="HQ Activity Tracking System")
         return embed
 
-    @ui.button(label="VERIFY PRESENCE", style=discord.ButtonStyle.blurple, emoji="✅")
-    async def confirm_button(self, interaction: discord.Interaction, button: ui.Button):
-        # Kiểm tra xem có đúng Role không
-        if self.target_role not in interaction.user.roles:
-            return await interaction.response.send_message("❌ Access Denied: You are not assigned to this unit.", ephemeral=True)
-        
-        # Kiểm tra xem đã điểm danh chưa
-        if interaction.user.id in self.verified_users:
-            return await interaction.response.send_message("⚠️ Verification already logged.", ephemeral=True)
-        
-        # Ghi nhận điểm danh và cập nhật tin nhắn
-        self.verified_users.add(interaction.user.id)
-        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+    @ui.button(label="CONFIRM PRESENCE", style=discord.ButtonStyle.success, emoji="✅")
+    async def confirm(self, itn: discord.Interaction, button: ui.Button):
+        if self.target_role not in itn.user.roles:
+            return await itn.response.send_message("❌ Error: You don't have the required Role!", ephemeral=True)
+        if itn.user.id in self.verified_users:
+            return await itn.response.send_message("⚠️ Notice: You are already marked as Present.", ephemeral=True)
+            
+        self.verified_users.add(itn.user.id)
+        await itn.response.edit_message(embed=self.build_embed(), view=self)
 
 # ==========================================
-# 🤖 BOT INITIALIZATION
+# 🤖 KHỞI TẠO HỆ THỐNG BOT
 # ==========================================
-class ModernBot(commands.Bot):
+class VPACBot(commands.Bot):
     def __init__(self):
         super().__init__(command_prefix="!", intents=discord.Intents.all())
         
     async def setup_hook(self):
         await self.tree.sync()
-        print(f"HQ System is Online: {self.user.name}")
+        print(f"--- HQ SYSTEM ONLINE ---")
+        print(f"Logged in as: {self.user.name}")
+        print(f"ID: {self.user.id}")
+        print(f"------------------------")
 
-bot = ModernBot()
+bot = VPACBot()
 
-# Tự động ban nếu phát hiện người nằm trong Blacklist tham gia server
 @bot.event
 async def on_member_join(member):
     data = load_data()
     if str(member.id) in data["blacklist"]:
-        try:
-            await member.ban(reason="HQ Auto-Ban: Blacklisted Personnel")
-        except:
+        try: 
+            await member.ban(reason="System Security: Blacklisted User")
+        except: 
             pass
 
 # ==========================================
-# ⚡ HQ COMMANDS (LỆNH QUẢN TRỊ HIỆN ĐẠI)
+# 🛡️ CÁC LỆNH QUẢN TRỊ (MODERATION)
 # ==========================================
 
-# 1. ANNOUNCE COMMAND (THÔNG BÁO)
-@bot.tree.command(name="announce", description="Broadcast a modern system announcement")
+@bot.tree.command(name="blacklist", description="Blacklist user and create evidence thread")
 @app_commands.checks.has_permissions(administrator=True)
-async def announce(interaction: discord.Interaction, channel: discord.TextChannel, title: str, content: str, ping_role: discord.Role = None):
-    embed = discord.Embed(title=f"📢 {title.upper()}", description=content, color=0x5865F2)
-    embed.timestamp = datetime.datetime.now()
-    embed.set_footer(text=f"Authorized by {interaction.user.name}", icon_url=interaction.user.display_avatar.url)
-    
-    ping_text = ping_role.mention if ping_role else ""
-    await channel.send(content=ping_text, embed=embed)
-    await interaction.response.send_message("✅ Dispatch successful.", ephemeral=True)
-
-# 2. ACTIVITY CHECK COMMAND (TẠO ĐIỂM DANH)
-@bot.tree.command(name="activity_check", description="Initiate a unit roll call")
-@app_commands.checks.has_permissions(administrator=True)
-async def activity_check(interaction: discord.Interaction, role: discord.Role, note: str, message: str = "Acknowledge immediately."):
-    view = ActivityView(target_role=role, note=note, message=message)
-    await interaction.response.send_message(embed=view.build_embed(), view=view)
-
-# 3. BLACKLIST COMMAND (CẤM CỬA & TẠO THREAD)
-@bot.tree.command(name="blacklist", description="Blacklist user & secure evidence")
-@app_commands.checks.has_permissions(administrator=True)
-async def blacklist(interaction: discord.Interaction, user_id: str, roblox_name: str, roblox_url: str, violation: str, game_url: str, note: str = "N/A"):
+async def blacklist(itn: discord.Interaction, user_id: str, roblox_name: str, roblox_url: str, violation: str, game_url: str, note: str = "ok"):
     data = load_data()
-    uid_str = str(user_id)
-    incident_id = str(uuid.uuid4())[:8].upper()
+    uid_str, incident_uuid = str(user_id), str(uuid.uuid4())[:15]
     current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     
-    # Lưu vào database
     data["blacklist"][uid_str] = {
-        "uuid": incident_id, 
+        "uuid": incident_uuid, 
         "roblox_name": roblox_name, 
         "roblox_url": roblox_url, 
         "violation": violation, 
-        "game": game_url, 
+        "game_url": game_url, 
         "note": note, 
         "date": current_time, 
-        "staff": interaction.user.name
+        "staff": itn.user.name
     }
     save_data(data)
     
-    # Tạo Embed hiển thị
-    embed = discord.Embed(title="🚫 TARGET BLACKLISTED", color=0x2b2d31)
-    embed.add_field(name="👤 Roblox Identity", value=f"[{roblox_name}]({roblox_url})", inline=True)
-    embed.add_field(name="🆔 Discord ID", value=f"`{user_id}`", inline=True)
-    embed.add_field(name="⚠️ Violation Record", value=f"```{violation}```", inline=False)
-    embed.add_field(name="📍 Origin Server", value=f"[Server Link]({game_url})", inline=True)
-    embed.add_field(name="📝 Intel Note", value=note, inline=True)
-    embed.set_footer(text=f"Officer: {interaction.user.name} | Incident ID: {incident_id} | {current_time}")
-    
-    # Thực hiện Ban
+    user_name, avatar_url = "User", "https://i.imgur.com/8Nba9ft.png"
     try:
-        await interaction.guild.ban(discord.Object(id=int(user_id)), reason=f"HQ Blacklist: {violation}")
-    except:
+        u = await bot.fetch_user(int(user_id))
+        user_name, avatar_url = u.name, u.display_avatar.url
+    except: 
         pass
         
-    await interaction.response.send_message(embed=embed)
-    original_msg = await interaction.original_response()
+    embed = discord.Embed(title="PERSONNEL BLACKLISTED", color=0xff0000)
+    embed.set_author(name=f"{user_name} has been flagged", icon_url=avatar_url)
+    embed.set_thumbnail(url=avatar_url)
+    embed.add_field(name="Commanding Staff:", value=itn.user.mention, inline=False)
+    embed.add_field(name="Date Recorded:", value=current_time, inline=False)
+    embed.add_field(name="Case UUID:", value=f"`{incident_uuid}`", inline=False)
     
-    # Tạo Thread chứa bằng chứng
+    target_info = (
+        f"**Roblox Name:** {roblox_name}\n"
+        f"**Roblox URL:** {roblox_url}\n"
+        f"**Violation:** {violation}\n"
+        f"**Discord ID:** {user_id}\n"
+        f"**Game Link:** {game_url}\n"
+        f"**Note:** {note}"
+    )
+    embed.add_field(name="Target Information", value=target_info, inline=False)
+    
+    try: 
+        await itn.guild.ban(discord.Object(id=int(user_id)), reason="Blacklisted from HQ")
+    except: 
+        pass
+        
+    await itn.response.send_message(embed=embed)
+    msg = await itn.original_response()
+    
     try:
-        thread = await original_msg.create_thread(name=f"EVIDENCE-{roblox_name}", auto_archive_duration=1440)
-        await thread.send("`[HQ SYSTEM]` Upload all photographic or video evidence of the violation below.")
-    except:
+        thread = await msg.create_thread(name=f"Evidence-{roblox_name}", auto_archive_duration=1440)
+        await thread.send(f"⚠️ **Evidence File for {roblox_name}**. Please upload all proofs here.")
+    except: 
         pass
 
-# 4. BASIC MODERATION (BAN/KICK/MUTE)
-@bot.tree.command(name="ban", description="Ban a personnel")
+@bot.tree.command(name="activity_check", description="Start unit roll call")
+async def activity_check(itn: discord.Interaction, role: discord.Role, note: str, message_content: str = "Acknowledge the order!"):
+    view = ActivityView(target_role=role, note=note, message_content=message_content)
+    await itn.response.send_message(embed=view.build_embed(), view=view)
+
+@bot.tree.command(name="ban", description="Ban a member")
 @app_commands.checks.has_permissions(ban_members=True)
-async def ban(interaction: discord.Interaction, member: discord.Member, reason: str = "Code of Conduct Violation"):
+async def ban(itn: discord.Interaction, member: discord.Member, reason: str = "Violation"):
     await member.ban(reason=reason)
-    await interaction.response.send_message(f"🔨 **{member.name}** has been banned. Reason: `{reason}`")
+    await itn.response.send_message(f"✅ Banned: {member.name}")
 
-@bot.tree.command(name="kick", description="Kick a personnel")
+@bot.tree.command(name="kick", description="Kick a member")
 @app_commands.checks.has_permissions(kick_members=True)
-async def kick(interaction: discord.Interaction, member: discord.Member, reason: str = "Code of Conduct Violation"):
-    await member.kick(reason=reason)
-    await interaction.response.send_message(f"👢 **{member.name}** has been discharged. Reason: `{reason}`")
+async def kick(itn: discord.Interaction, member: discord.Member):
+    await member.kick()
+    await itn.response.send_message(f"✅ Kicked: {member.name}")
 
-@bot.tree.command(name="mute", description="Timeout a personnel")
+@bot.tree.command(name="mute", description="Timeout a member")
 @app_commands.checks.has_permissions(moderate_members=True)
-async def mute(interaction: discord.Interaction, member: discord.Member, minutes: int):
-    duration = datetime.timedelta(minutes=minutes)
-    await member.timeout(duration)
-    await interaction.response.send_message(f"🔇 **{member.name}** communications restricted for `{minutes}` minutes.")
+async def mute(itn: discord.Interaction, member: discord.Member, minutes: int):
+    await member.timeout(datetime.timedelta(minutes=minutes))
+    await itn.response.send_message(f"✅ Muted {member.name} for {minutes} minutes")
 
-# 5. WARNING SYSTEM (CẢNH CÁO & XEM LỊCH SỬ)
-@bot.tree.command(name="warn", description="Issue a formal warning")
+@bot.tree.command(name="warn", description="Issue a warning")
 @app_commands.checks.has_permissions(moderate_members=True)
-async def warn(interaction: discord.Interaction, member: discord.Member, reason: str):
+async def warn(itn: discord.Interaction, member: discord.Member, reason: str):
     data = load_data()
-    uid_str = str(member.id)
+    uid = str(member.id)
+    if uid not in data["warns"]: data["warns"][uid] = []
     
-    if uid_str not in data["warns"]:
-        data["warns"][uid_str] = []
-        
-    current_date = datetime.datetime.now().strftime("%Y-%m-%d")
-    data["warns"][uid_str].append({
+    data["warns"][uid].append({
         "reason": reason, 
-        "date": current_date, 
-        "by": interaction.user.name
+        "date": datetime.datetime.now().strftime("%d/%m/%Y %H:%M"), 
+        "by": itn.user.name
     })
     save_data(data)
-    
-    embed = discord.Embed(title="⚠️ FORMAL WARNING", color=0xED4245)
-    embed.description = f"**Target:** {member.mention}\n**Offense:** `{reason}`"
-    await interaction.response.send_message(embed=embed)
+    await itn.response.send_message(f"⚠️ Warning issued to {member.name}. Reason: {reason}")
 
-@bot.tree.command(name="check_warns", description="Access personnel warning logs")
-async def check_warns(interaction: discord.Interaction, member: discord.Member):
+@bot.tree.command(name="check_warns", description="View warning history")
+async def check_warns(itn: discord.Interaction, member: discord.Member):
     data = load_data()
-    uid_str = str(member.id)
-    
-    if uid_str not in data["warns"] or not data["warns"][uid_str]: 
-        embed = discord.Embed(title="📁 PERSONNEL LOGS", description=f"✅ {member.name} maintains a clean record.", color=0x57F287)
-        return await interaction.response.send_message(embed=embed)
-    
-    embed = discord.Embed(title=f"📁 SECURITY LOGS: {member.name}", color=0xED4245)
-    for index, warning in enumerate(data["warns"][uid_str], 1):
-        embed.add_field(
-            name=f"Incident #{index} • {warning['date']}", 
-            value=f"**Reason:** {warning['reason']}\n**Officer:** {warning['by']}", 
-            inline=False
-        )
+    uid = str(member.id)
+    if uid not in data["warns"] or not data["warns"][uid]: 
+        return await itn.response.send_message(f"Clean record for {member.name}.")
         
-    await interaction.response.send_message(embed=embed)
+    history = "\n".join([f"📅 {w['date']} - {w['reason']} (by {w['by']})" for w in data["warns"][uid]])
+    embed = discord.Embed(title=f"Warning Logs: {member.name}", description=history, color=0xFEE75C)
+    await itn.response.send_message(embed=embed)
 
 # ==========================================
-# 🚀 KHỞI CHẠY BOT
+# 🌐 HỆ THỐNG NGOẠI GIAO (DIPLOMACY SYSTEM)
+# ==========================================
+
+@bot.tree.command(name="diplomacy_add", description="Add a group to diplomatic registry")
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.choices(status=[
+    app_commands.Choice(name="Allied (Đồng minh)", value="Allied"),
+    app_commands.Choice(name="Neutral (Trung lập)", value="Neutral"),
+    app_commands.Choice(name="Hostile (Thù địch)", value="Hostile")
+])
+async def diplomacy_add(itn: discord.Interaction, group_name: str, status: str, link: str = "No Link"):
+    data = load_data()
+    data["diplomacy"][group_name] = {
+        "status": status,
+        "link": link,
+        "date": datetime.datetime.now().strftime("%d/%m/%Y"),
+        "staff": itn.user.name
+    }
+    save_data(data)
+    
+    color = 0x57F287 if status == "Allied" else (0xFEE75C if status == "Neutral" else 0xED4245)
+    embed = discord.Embed(title="Diplomatic Registry Updated", color=color)
+    embed.add_field(name="Group:", value=group_name, inline=True)
+    embed.add_field(name="Status:", value=f"`{status}`", inline=True)
+    embed.add_field(name="Link:", value=link, inline=False)
+    embed.set_footer(text=f"Updated by {itn.user.name}")
+    
+    await itn.response.send_message(embed=embed)
+
+@bot.tree.command(name="diplomacy_list", description="Show all diplomatic relations")
+async def diplomacy_list(itn: discord.Interaction):
+    data = load_data()
+    if not data["diplomacy"]:
+        return await itn.response.send_message("No diplomatic data found.")
+        
+    embed = discord.Embed(title="Global Diplomatic Relations", color=0x3498db)
+    
+    allied_list = ""
+    hostile_list = ""
+    neutral_list = ""
+    
+    for group, info in data["diplomacy"].items():
+        text = f"• **{group}** - [Link]({info['link']})\n"
+        if info["status"] == "Allied": allied_list += text
+        elif info["status"] == "Hostile": hostile_list += text
+        else: neutral_list += text
+            
+    if allied_list: embed.add_field(name="🟢 ALLIES", value=allied_list, inline=False)
+    if neutral_list: embed.add_field(name="🟡 NEUTRALS", value=neutral_list, inline=False)
+    if hostile_list: embed.add_field(name="🔴 HOSTILES", value=hostile_list, inline=False)
+    
+    await itn.response.send_message(embed=embed)
+
+# ==========================================
+# 🚀 KHỞI CHẠY HỆ THỐNG
 # ==========================================
 if __name__ == "__main__":
-    keep_alive()
-    # Nhớ đổi "DISCORD_TOKEN" thành Token thật hoặc dùng os.getenv("DISCORD_TOKEN")
-    bot.run("DISCORD_TOKEN")
+    keep_alive() # Chạy web server ngầm
+    bot.run(TOKEN)
