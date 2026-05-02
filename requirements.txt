@@ -1,6 +1,2 @@
-disnake
-aiosqlite
-psutil
-pandas
-openpyxl
+discord.py
 flask
